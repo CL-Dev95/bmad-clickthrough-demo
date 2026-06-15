@@ -1,12 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import "./BmadDemoPage.css";
 
-type BmadTrack = "method" | "quick" | "enterprise";
+type BmadTrack = "method" | "quick";
 
 type BmadArtifact = {
   name: string;
   description: string;
   content: string;
+};
+
+type ChatMessage = {
+  speaker: "human" | "agent" | "system" | "artifact";
+  text: string;
+  artifactName?: string;
 };
 
 type BmadPhase = {
@@ -39,15 +45,15 @@ const phases: BmadPhase[] = [
     purpose:
       "Initialize the workspace and choose the right BMAD path.",
     scenario:
-      "StormBrief turns trusted NOAA-style hazard data into reviewed operational briefings.",
+      "A human project manager, product owner, stakeholder, or project team begins BMAD inside a code IDE and uses StormBrief as the project concept.",
     workflowSummary:
-      "Install BMAD and use BMAD-Help to select the right planning path before any artifacts are created.",
+      "The interaction installs BMAD into the project filesystem, then BMAD-Help reads the app request and recommends the right planning path.",
     guide:
       "Next: Run product brief or PRD in a fresh chat.",
     workflows: ["npx bmad-method install", "bmad-help"],
     inputs: ["Project folder", "StormBrief idea", "Preferred AI IDE"],
     outputs: ["_bmad/", "_bmad-output/", "Recommended next workflow"],
-    tracks: ["method", "quick", "enterprise"],
+    tracks: ["method", "quick"],
     artifacts: [
       {
         name: "stormbrief-bmad-help-guidance.md",
@@ -104,7 +110,7 @@ Run bmad-product-brief or bmad-prd in a fresh chat.
       "product-brief.md",
       "prfaq.md",
     ],
-    tracks: ["method", "enterprise"],
+    tracks: ["method"],
     artifacts: [
       {
         name: "stormbrief-product-brief.md",
@@ -167,7 +173,7 @@ It reduces assembly time while improving consistency, auditability, and confiden
     workflows: ["bmad-prd"],
     inputs: ["Product brief", "PRFAQ", "Research findings", "Stakeholder constraints"],
     outputs: ["prd.md", "addendum.md", "decision-log.md", "validation-report.html"],
-    tracks: ["method", "enterprise"],
+    tracks: ["method"],
     artifacts: [
       {
         name: "stormbrief-prd.md",
@@ -226,7 +232,7 @@ Rationale: A controlled workflow gives the team a measurable first release and a
     workflows: ["bmad-agent-ux-designer", "bmad-ux"],
     inputs: ["PRD", "Primary personas", "Critical user flows", "Accessibility constraints"],
     outputs: ["ux-spec.md", "screen-flow-notes.md", "interaction decisions"],
-    tracks: ["method", "enterprise"],
+    tracks: ["method"],
     artifacts: [
       {
         name: "stormbrief-ux-spec.md",
@@ -265,7 +271,7 @@ Rationale: A controlled workflow gives the team a measurable first release and a
     workflows: ["bmad-agent-architect", "bmad-create-architecture"],
     inputs: ["PRD", "UX spec", "NOAA data constraints", "Project context"],
     outputs: ["architecture.md", "architecture decision records", "technical risks"],
-    tracks: ["method", "enterprise"],
+    tracks: ["method"],
     artifacts: [
       {
         name: "stormbrief-architecture.md",
@@ -305,7 +311,7 @@ Rationale: A controlled workflow gives the team a measurable first release and a
     workflows: ["bmad-agent-pm", "bmad-create-epics-and-stories"],
     inputs: ["PRD", "Architecture", "UX spec", "Decision log"],
     outputs: ["epics/", "story files", "acceptance criteria", "implementation sequence"],
-    tracks: ["method", "enterprise"],
+    tracks: ["method"],
     artifacts: [
       {
         name: "stormbrief-epic-alert-ingestion.md",
@@ -356,7 +362,7 @@ As a forecaster, I want StormBrief to show active alerts for configured watch zo
     workflows: ["bmad-agent-architect", "bmad-check-implementation-readiness"],
     inputs: ["PRD", "Architecture", "UX spec", "Epics and stories"],
     outputs: ["readiness-report.md", "PASS / CONCERNS / FAIL decision", "risk list"],
-    tracks: ["method", "enterprise"],
+    tracks: ["method"],
     artifacts: [
       {
         name: "stormbrief-readiness-report.md",
@@ -395,7 +401,7 @@ Concerns:
     workflows: ["bmad-agent-dev", "bmad-sprint-planning"],
     inputs: ["Epics", "Story backlog", "Architecture", "Project context"],
     outputs: ["sprint-status.yaml", "selected story sequence", "implementation state"],
-    tracks: ["method", "enterprise"],
+    tracks: ["method"],
     artifacts: [
       {
         name: "stormbrief-sprint-status.yaml",
@@ -437,7 +443,7 @@ stories:
     ],
     inputs: ["Sprint status", "Selected story", "Existing codebase", "Acceptance criteria"],
     outputs: ["story-[slug].md", "working code and tests", "code review notes", "retrospective.md"],
-    tracks: ["method", "enterprise"],
+    tracks: ["method"],
     artifacts: [
       {
         name: "stormbrief-code-review.md",
@@ -510,7 +516,6 @@ Add a CSV export action to the existing approved-briefings table.
 const trackLabels: Record<BmadTrack, string> = {
   method: "BMad Method",
   quick: "Quick Flow",
-  enterprise: "Enterprise",
 };
 
 const trackNotes: Record<BmadTrack, string> = {
@@ -518,8 +523,6 @@ const trackNotes: Record<BmadTrack, string> = {
     "Best fit for StormBrief: PRD, UX, architecture, epics, and implementation stories stay connected.",
   quick:
     "Use for a small NOAA-related enhancement when scope and architecture are already settled.",
-  enterprise:
-    "Extends the same flow with deeper security, DevOps, governance, and compliance artifacts.",
 };
 
 function downloadArtifact(artifact: BmadArtifact) {
@@ -534,12 +537,334 @@ function downloadArtifact(artifact: BmadArtifact) {
   URL.revokeObjectURL(url);
 }
 
+function compactChat(messages: ChatMessage[]): ChatMessage[] {
+  return messages.filter((message) => message.speaker !== "artifact" || Boolean(message.artifactName));
+}
+
+function getPhaseChat(phase: BmadPhase): ChatMessage[] {
+  const primaryArtifact = phase.artifacts[0];
+  const secondaryArtifact = phase.artifacts[1];
+
+  switch (phase.id) {
+    case "start":
+      return [
+        {
+          speaker: "human",
+          text: "Create an application that helps NOAA-style forecast teams turn alerts, marine forecasts, rainfall risk, and coastal observations into reviewed impact briefings. Use /docs/stormbrief-concept-note.md as the starting reference.",
+        },
+        {
+          speaker: "system",
+          text: "Human runs npx bmad-method install in the code IDE terminal. BMAD is installed into the project filesystem with workspace folders for method assets and generated outputs.",
+        },
+        {
+          speaker: "agent",
+          text: "I’ll use the StormBrief concept note as source context. If scope, users, or constraints are missing, I’ll ask for that context before recommending a BMAD path.",
+        },
+        {
+          speaker: "system",
+          text: "BMAD checks scope, risk, users, data dependencies, and implementation surface.",
+        },
+        {
+          speaker: "agent",
+          text: "From the context provided, StormBrief has forecast-team users, source-data constraints, human review, and a buildable product surface. Use the BMad Method track.",
+        },
+        {
+          speaker: "agent",
+          text: "I have enough context to create the initial BMAD guidance document and identify the next planning workflow.",
+        },
+        {
+          speaker: "artifact",
+          text: "Guidance created with the recommended next workflow.",
+          artifactName: primaryArtifact.name,
+        },
+      ];
+    case "analysis":
+      return compactChat([
+        {
+          speaker: "human",
+          text: "We need to clarify the StormBrief opportunity before writing requirements.",
+        },
+        {
+          speaker: "agent",
+          text: "I’ll use the concept context and ask for clarification around users, hazards, NOAA-style data assumptions, pain points, and product boundaries.",
+        },
+        {
+          speaker: "system",
+          text: "Running analysis workflows: brainstorming, domain research, product brief, and optional PRFAQ.",
+        },
+        {
+          speaker: "agent",
+          text: "Based on the context so far, the strongest direction is an internal briefing workspace for forecasters, emergency managers, and harbor operators.",
+        },
+        {
+          speaker: "agent",
+          text: "I have enough context to create the product brief and optional PRFAQ for stakeholder review.",
+        },
+        {
+          speaker: "artifact",
+          text: "Analysis output created for stakeholder review.",
+          artifactName: primaryArtifact.name,
+        },
+        {
+          speaker: "artifact",
+          text: "Optional challenge document created to test the product concept.",
+          artifactName: secondaryArtifact?.name,
+        },
+      ]);
+    case "planning":
+      return compactChat([
+        {
+          speaker: "human",
+          text: "Turn the StormBrief concept into requirements.",
+        },
+        {
+          speaker: "agent",
+          text: "I’ll use the product brief as context. Before drafting the PRD, please confirm the primary user roles and any constraints that should shape the requirements.",
+        },
+        {
+          speaker: "human",
+          text: "Use forecasters, lead reviewers, emergency managers, and harbor operators as primary users.",
+        },
+        {
+          speaker: "system",
+          text: "Drafting PRD sections: goals, users, functional requirements, review workflow, accessibility, and data provenance.",
+        },
+        {
+          speaker: "agent",
+          text: "I have enough context to create the PRD and decision log for StormBrief.",
+        },
+        {
+          speaker: "artifact",
+          text: "PRD created for the StormBrief build path.",
+          artifactName: primaryArtifact.name,
+        },
+        {
+          speaker: "artifact",
+          text: "Decision log created to preserve planning choices.",
+          artifactName: secondaryArtifact?.name,
+        },
+      ]);
+    case "ux":
+      return [
+        {
+          speaker: "human",
+          text: "Design the StormBrief interface for operational use.",
+        },
+        {
+          speaker: "agent",
+          text: "I’ll use the PRD context and ask for any missing workflow details before shaping the dashboard, alert details, briefing composer, and review queue.",
+        },
+        {
+          speaker: "system",
+          text: "Translating PRD requirements into screen flows and interaction decisions.",
+        },
+        {
+          speaker: "agent",
+          text: "Using the provided workflow context, the interface should prioritize scanning, source timestamps, degraded data states, and clear draft versus approved language.",
+        },
+        {
+          speaker: "agent",
+          text: "I have enough context to create the UX specification for the StormBrief operational interface.",
+        },
+        {
+          speaker: "artifact",
+          text: "UX specification created for design and implementation alignment.",
+          artifactName: primaryArtifact.name,
+        },
+      ];
+    case "architecture":
+      return [
+        {
+          speaker: "human",
+          text: "Create the technical architecture for StormBrief.",
+        },
+        {
+          speaker: "agent",
+          text: "I’ll use the PRD and UX context. If integration, security, or data-retention details are missing, I’ll request that context before finalizing architecture.",
+        },
+        {
+          speaker: "system",
+          text: "Evaluating data boundaries, resilience, export controls, and implementation risks.",
+        },
+        {
+          speaker: "agent",
+          text: "Based on the available technical context, the core architecture keeps experts in control, stores source snapshots, and handles delayed feeds with explicit degraded states.",
+        },
+        {
+          speaker: "agent",
+          text: "I have enough context to create the architecture documentation for StormBrief.",
+        },
+        {
+          speaker: "artifact",
+          text: "Architecture document created for story generation.",
+          artifactName: primaryArtifact.name,
+        },
+      ];
+    case "epics":
+      return compactChat([
+        {
+          speaker: "human",
+          text: "Break StormBrief into implementable epics and stories.",
+        },
+        {
+          speaker: "agent",
+          text: "I’ll use the PRD, UX spec, architecture, and decision log as context. If priority or sequencing is unclear, I’ll ask before creating backlog slices.",
+        },
+        {
+          speaker: "system",
+          text: "Creating epic sequence: ingestion, watch zones, briefing composition, review, and exports.",
+        },
+        {
+          speaker: "agent",
+          text: "Given the current product and architecture context, the first epic should establish trusted alert and forecast ingestion with provenance and freshness indicators.",
+        },
+        {
+          speaker: "agent",
+          text: "I have enough context to create the first epic and implementation story.",
+        },
+        {
+          speaker: "artifact",
+          text: "Epic created with implementation-oriented story boundaries.",
+          artifactName: primaryArtifact.name,
+        },
+        {
+          speaker: "artifact",
+          text: "First story drafted with acceptance criteria.",
+          artifactName: secondaryArtifact?.name,
+        },
+      ]);
+    case "readiness":
+      return [
+        {
+          speaker: "human",
+          text: "Check whether StormBrief is ready for implementation.",
+        },
+        {
+          speaker: "agent",
+          text: "I’ll use the PRD, UX, architecture, epics, and stories as context, then call out any missing owner decisions or conflicting assumptions.",
+        },
+        {
+          speaker: "system",
+          text: "Assessing requirement coverage, architecture alignment, story completeness, and unresolved risks.",
+        },
+        {
+          speaker: "agent",
+          text: "The context is mostly aligned, but I need owner confirmation on authentication, production data expectations, and export retention.",
+        },
+        {
+          speaker: "agent",
+          text: "I have enough context to create the implementation readiness report and document the remaining concerns.",
+        },
+        {
+          speaker: "artifact",
+          text: "Readiness report created with a CONCERNS decision.",
+          artifactName: primaryArtifact.name,
+        },
+      ];
+    case "sprint":
+      return [
+        {
+          speaker: "human",
+          text: "Initialize sprint planning for the first StormBrief implementation pass.",
+        },
+        {
+          speaker: "agent",
+          text: "I’ll use the backlog and architecture context to select a practical first sequence, and I’ll ask for capacity or priority context if it is missing.",
+        },
+        {
+          speaker: "system",
+          text: "Selecting first sprint: watch-zone alerts, marine zone mapping, draft initiation, and freshness banners.",
+        },
+        {
+          speaker: "agent",
+          text: "Based on the available sprint context, the first ready story is watch-zone alerts because it proves ingestion, zone matching, and operational visibility.",
+        },
+        {
+          speaker: "agent",
+          text: "I have enough context to create the sprint tracking file and first implementation sequence.",
+        },
+        {
+          speaker: "artifact",
+          text: "Sprint tracking file created.",
+          artifactName: primaryArtifact.name,
+        },
+      ];
+    case "build":
+      return compactChat([
+        {
+          speaker: "human",
+          text: "Start the BMAD build loop for the selected story.",
+        },
+        {
+          speaker: "agent",
+          text: "I’ll use the selected story, acceptance criteria, and codebase context. If implementation details are missing, I’ll request them before coding.",
+        },
+        {
+          speaker: "system",
+          text: "Simulating create story, develop story, code review, and retrospective.",
+        },
+        {
+          speaker: "agent",
+          text: "Using the implementation context, the review catches stale-data test coverage, source timestamp visibility, and keyboard focus follow-up.",
+        },
+        {
+          speaker: "agent",
+          text: "I have enough context to create the code review output and retrospective notes.",
+        },
+        {
+          speaker: "artifact",
+          text: "Code review output created.",
+          artifactName: primaryArtifact.name,
+        },
+        {
+          speaker: "artifact",
+          text: "Retrospective captured for the next epic.",
+          artifactName: secondaryArtifact?.name,
+        },
+      ]);
+    case "quick-flow":
+      return [
+        {
+          speaker: "human",
+          text: "We only need CSV export for approved briefings. Can BMAD stay lightweight?",
+        },
+        {
+          speaker: "agent",
+          text: "Yes. Based on the context provided, Quick Flow is appropriate because the change is narrow, the acceptance criteria are clear, and architecture is settled.",
+        },
+        {
+          speaker: "system",
+          text: "Creating a compact spec and implementation checklist for one enhancement.",
+        },
+        {
+          speaker: "agent",
+          text: "Using that enhancement context, the export must include approved briefing metadata, handle CSV escaping, and stay disabled until approval.",
+        },
+        {
+          speaker: "agent",
+          text: "I have enough context to create the Quick Flow specification for the CSV export enhancement.",
+        },
+        {
+          speaker: "artifact",
+          text: "Quick Flow spec created.",
+          artifactName: primaryArtifact.name,
+        },
+      ];
+    default:
+      return [];
+  }
+}
+
 export function BmadDemoPage() {
   const [activeId, setActiveId] = useState(phases[0].id);
   const [track, setTrack] = useState<BmadTrack>("method");
-  const [previewArtifactName, setPreviewArtifactName] = useState(phases[0].artifacts[0].name);
+  const [previewArtifactName, setPreviewArtifactName] = useState<string | null>(null);
+  const [completedPhaseIds, setCompletedPhaseIds] = useState<Set<string>>(new Set());
+  const [referenceExpanded, setReferenceExpanded] = useState(false);
   const [controlsVisible, setControlsVisible] = useState(false);
   const controlsSentinelRef = useRef<HTMLDivElement | null>(null);
+  const artifactPreviewRef = useRef<HTMLElement | null>(null);
+  const phaseDetailRef = useRef<HTMLElement | null>(null);
 
   const visiblePhases = useMemo(
     () => phases.filter((phase) => phase.tracks.includes(track)),
@@ -548,12 +873,20 @@ export function BmadDemoPage() {
 
   const activePhase = visiblePhases.find((phase) => phase.id === activeId) ?? visiblePhases[0];
   const activeIndex = visiblePhases.findIndex((phase) => phase.id === activePhase.id);
-  const completedPhases = visiblePhases.slice(0, activeIndex + 1);
+  const completedVisibleCount = visiblePhases.filter((phase) =>
+    completedPhaseIds.has(phase.id),
+  ).length;
+  const firstIncompleteIndex = visiblePhases.findIndex(
+    (phase) => !completedPhaseIds.has(phase.id),
+  );
+  const maxUnlockedIndex =
+    firstIncompleteIndex === -1 ? visiblePhases.length - 1 : firstIncompleteIndex;
+  const completedPhases = visiblePhases.filter((phase) => completedPhaseIds.has(phase.id));
   const visibleArtifacts = completedPhases.flatMap((phase) => phase.artifacts);
   const previewArtifact =
     activePhase.artifacts.find((artifact) => artifact.name === previewArtifactName) ??
     activePhase.artifacts[0];
-  const progress = Math.round(((activeIndex + 1) / visiblePhases.length) * 100);
+  const progress = Math.round((completedVisibleCount / visiblePhases.length) * 100);
 
   useEffect(() => {
     const sentinel = controlsSentinelRef.current;
@@ -578,41 +911,82 @@ export function BmadDemoPage() {
     setTrack(nextTrack);
     const nextPhase = phases.find((phase) => phase.tracks.includes(nextTrack)) ?? phases[0];
     setActiveId(nextPhase.id);
-    setPreviewArtifactName(nextPhase.artifacts[0].name);
+    setPreviewArtifactName(null);
   }
 
   function selectPhase(phase: BmadPhase) {
+    const nextIndex = visiblePhases.findIndex((item) => item.id === phase.id);
+
+    if (nextIndex > maxUnlockedIndex) {
+      return;
+    }
+
     setActiveId(phase.id);
-    setPreviewArtifactName(phase.artifacts[0].name);
+    setPreviewArtifactName(null);
+  }
+
+  function scrollToPhaseStart() {
+    window.setTimeout(() => {
+      phaseDetailRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    }, 0);
+  }
+
+  function completePhase(phaseId: string) {
+    setCompletedPhaseIds((current) => {
+      if (current.has(phaseId)) {
+        return current;
+      }
+
+      const next = new Set(current);
+      next.add(phaseId);
+      return next;
+    });
   }
 
   function goToPrevious() {
     const nextPhase = visiblePhases[Math.max(0, activeIndex - 1)];
     selectPhase(nextPhase);
+    scrollToPhaseStart();
   }
 
   function goToNext() {
-    const nextPhase = visiblePhases[Math.min(visiblePhases.length - 1, activeIndex + 1)];
+    const nextIndex = Math.min(visiblePhases.length - 1, activeIndex + 1);
+    const nextPhase = visiblePhases[nextIndex];
     selectPhase(nextPhase);
+    scrollToPhaseStart();
+  }
+
+  function handlePreviewArtifact(artifact: BmadArtifact) {
+    setPreviewArtifactName((current) => (current === artifact.name ? null : artifact.name));
+    window.setTimeout(() => {
+      artifactPreviewRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    }, 0);
   }
 
   return (
     <main className="bmad-demo-shell">
       <section className="bmad-intro" aria-labelledby="bmad-title">
         <div>
-          <p className="bmad-kicker">BMAD Method Framework Demo</p>
+          <p className="bmad-kicker">Building a Tailored Application Using the BMAD Method</p>
           <h1 id="bmad-title">StormBrief</h1>
           <p>
-            A NOAA-related click-through that shows how BMAD turns an operational
-            weather idea into source-backed documents, implementation stories, and
-            a repeatable build cycle.
+            A human-driven, AI-powered BMAD demo for building NOAA StormBrief, a
+            web application that helps forecast teams turn trusted alerts,
+            marine forecasts, rainfall risk, and coastal observations into
+            reviewed impact briefings.
           </p>
         </div>
 
         <div className="bmad-track-panel" aria-label="Planning track selector">
           <span>Planning track</span>
           <div className="bmad-track-options">
-            {(["method", "quick", "enterprise"] as BmadTrack[]).map((item) => (
+            {(["method", "quick"] as BmadTrack[]).map((item) => (
               <button
                 className={track === item ? "selected" : ""}
                 key={item}
@@ -630,7 +1004,7 @@ export function BmadDemoPage() {
       <section className="bmad-workspace" aria-label="BMAD workflow explorer">
         <aside className="bmad-timeline" aria-label="BMAD phases">
           <div className="bmad-progress">
-            <span>{trackLabels[track]} progress</span>
+            <span>Project progress</span>
             <strong>{progress}%</strong>
             <div>
               <i style={{ width: `${progress}%` }} />
@@ -642,10 +1016,12 @@ export function BmadDemoPage() {
               className={[
                 "bmad-phase-button",
                 phase.id === activePhase.id ? "active" : "",
-                index < activeIndex ? "complete" : "",
+                completedPhaseIds.has(phase.id) ? "complete" : "",
+                index > maxUnlockedIndex ? "locked" : "",
               ]
                 .filter(Boolean)
                 .join(" ")}
+              disabled={index > maxUnlockedIndex}
               key={phase.id}
               type="button"
               onClick={() => selectPhase(phase)}
@@ -659,7 +1035,7 @@ export function BmadDemoPage() {
           ))}
         </aside>
 
-        <article className="bmad-phase-detail">
+        <article className="bmad-phase-detail" ref={phaseDetailRef}>
           <div className="bmad-phase-heading">
             <div>
               <p className="bmad-kicker">{activePhase.eyebrow}</p>
@@ -684,52 +1060,93 @@ export function BmadDemoPage() {
             <p className="bmad-workflow-summary">{activePhase.workflowSummary}</p>
           </div>
 
-          <div className="bmad-phase-grid">
-            <PhaseList title="Inputs" items={activePhase.inputs} tone="inputs" />
-            <PhaseList title="Workflows" items={activePhase.workflows} code tone="workflows" />
-            <PhaseList title="Expected outputs" items={activePhase.outputs} tone="outputs" />
-          </div>
+          <PhaseChat
+            completed={completedPhaseIds.has(activePhase.id)}
+            phase={activePhase}
+            onComplete={() => completePhase(activePhase.id)}
+            onDownload={downloadArtifact}
+            onPreview={handlePreviewArtifact}
+          />
+
+          <section className={`bmad-reference-panel ${referenceExpanded ? "expanded" : ""}`}>
+            <button
+              className="bmad-reference-toggle"
+              type="button"
+              aria-expanded={referenceExpanded}
+              onClick={() => setReferenceExpanded((expanded) => !expanded)}
+            >
+              <span>Inputs, workflows, and outputs</span>
+              <strong>{referenceExpanded ? "Minimize" : "Expand"}</strong>
+            </button>
+
+            {referenceExpanded ? (
+              <div className="bmad-phase-grid">
+                <PhaseList title="Inputs" items={activePhase.inputs} tone="inputs" />
+                <PhaseList title="Workflows" items={activePhase.workflows} code tone="workflows" />
+                <PhaseList title="Expected outputs" items={activePhase.outputs} tone="outputs" />
+              </div>
+            ) : null}
+          </section>
 
           <div className="bmad-help-panel">
             <span>BMAD-Help</span>
             <p>{activePhase.guide}</p>
           </div>
 
-          <details className="bmad-artifact-preview">
-            <summary>
+          <section className="bmad-artifact-preview" ref={artifactPreviewRef}>
+            <div className="bmad-preview-heading">
               <div>
-                <span>Preview document</span>
-                <strong>{previewArtifact.name}</strong>
+                <span>Preview documents</span>
+                <strong>{activePhase.artifacts.length} generated</strong>
               </div>
-            </summary>
-            <div className="bmad-preview-actions">
-              <button type="button" onClick={() => downloadArtifact(previewArtifact)}>
-                Download
-              </button>
             </div>
-            <pre>{previewArtifact.content}</pre>
-          </details>
 
-          <div className="bmad-downloads">
-            <div>
-              <span>Sample documents</span>
-              <strong>{activePhase.artifacts.length} available</strong>
+            <div className="bmad-preview-documents">
+              {activePhase.artifacts.map((artifact) => {
+                const isSelected = artifact.name === previewArtifactName;
+
+                return (
+                  <article
+                    className={`bmad-preview-document ${isSelected ? "selected" : ""}`}
+                    key={artifact.name}
+                  >
+                    <div className="bmad-preview-document-header">
+                      <div>
+                        <span>{artifact.description}</span>
+                        <strong>{artifact.name}</strong>
+                      </div>
+                      <div className="bmad-preview-actions">
+                        <button
+                          aria-label={`Preview ${artifact.name}`}
+                          className="bmad-icon-button"
+                          title="Preview"
+                          type="button"
+                          onClick={() =>
+                            setPreviewArtifactName((current) =>
+                              current === artifact.name ? null : artifact.name,
+                            )
+                          }
+                        >
+                          👁️
+                        </button>
+                        <button
+                          aria-label={`Download ${artifact.name}`}
+                          className="bmad-icon-button"
+                          title="Download"
+                          type="button"
+                          onClick={() => downloadArtifact(artifact)}
+                        >
+                          ⬇️
+                        </button>
+                      </div>
+                    </div>
+                    {isSelected ? <pre>{artifact.content}</pre> : null}
+                  </article>
+                );
+              })}
             </div>
-            <div className="bmad-download-list">
-              {activePhase.artifacts.map((artifact) => (
-                <button
-                  className={artifact.name === previewArtifact.name ? "selected" : ""}
-                  key={artifact.name}
-                  type="button"
-                  onClick={() => setPreviewArtifactName(artifact.name)}
-                >
-                  <span>Preview</span>
-                  <strong>{artifact.name}</strong>
-                  <em>{artifact.description}</em>
-                </button>
-              ))}
-            </div>
-          </div>
+          </section>
+
         </article>
 
         <div className="bmad-controls-wrap">
@@ -749,7 +1166,7 @@ export function BmadDemoPage() {
               className="primary"
               type="button"
               onClick={goToNext}
-              disabled={activeIndex === visiblePhases.length - 1}
+              disabled={activeIndex === visiblePhases.length - 1 || activeIndex >= maxUnlockedIndex}
             >
               Next phase →
             </button>
@@ -777,6 +1194,280 @@ export function BmadDemoPage() {
       </section>
 
     </main>
+  );
+}
+
+function PhaseChat({
+  completed,
+  phase,
+  onComplete,
+  onPreview,
+  onDownload,
+}: {
+  completed: boolean;
+  phase: BmadPhase;
+  onComplete: () => void;
+  onPreview: (artifact: BmadArtifact) => void;
+  onDownload: (artifact: BmadArtifact) => void;
+}) {
+  const [visibleCount, setVisibleCount] = useState(0);
+  const [streamingIndex, setStreamingIndex] = useState<number | null>(null);
+  const [thinkingIndex, setThinkingIndex] = useState<number | null>(null);
+  const [systemThinkingIndex, setSystemThinkingIndex] = useState<number | null>(null);
+  const [streamedText, setStreamedText] = useState("");
+  const chatScreenRef = useRef<HTMLDivElement | null>(null);
+  const messages = useMemo(() => getPhaseChat(phase), [phase]);
+  const visibleMessages = messages.slice(0, visibleCount);
+  const isStarted = visibleCount > 0;
+  const isComplete = visibleCount === messages.length;
+  const isStreaming = streamingIndex !== null;
+  const isThinking = thinkingIndex !== null;
+  const isSystemThinking = systemThinkingIndex !== null;
+  const isBusy = isStreaming || isThinking || isSystemThinking;
+  const nextHumanIndex = messages.findIndex(
+    (message, index) => index >= visibleCount && message.speaker === "human",
+  );
+  const hasNextHumanInput = nextHumanIndex !== -1;
+
+  useEffect(() => {
+    setVisibleCount(completed ? messages.length : 0);
+    setStreamingIndex(null);
+    setThinkingIndex(null);
+    setSystemThinkingIndex(null);
+    setStreamedText("");
+  }, [completed, messages.length, phase.id]);
+
+  useEffect(() => {
+    if (isComplete && !completed) {
+      onComplete();
+    }
+  }, [completed, isComplete, onComplete]);
+
+  useEffect(() => {
+    const chatScreen = chatScreenRef.current;
+
+    if (!chatScreen) {
+      return;
+    }
+
+    chatScreen.scrollTop = chatScreen.scrollHeight;
+  }, [streamedText, thinkingIndex, visibleCount]);
+
+  useEffect(() => {
+    if (streamingIndex === null) {
+      return;
+    }
+
+    const message = messages[streamingIndex];
+
+    if (!message || message.speaker !== "agent") {
+      setStreamingIndex(null);
+      setStreamedText("");
+      return;
+    }
+
+    setStreamedText("");
+    let nextLength = 0;
+    const streamTimer = window.setInterval(() => {
+      nextLength += 1;
+      setStreamedText(message.text.slice(0, nextLength));
+
+      if (nextLength >= message.text.length) {
+        window.clearInterval(streamTimer);
+        setStreamingIndex(null);
+      }
+    }, 32);
+
+    return () => window.clearInterval(streamTimer);
+  }, [messages, streamingIndex]);
+
+  useEffect(() => {
+    if (!isStarted || isComplete || isBusy) {
+      return;
+    }
+
+    const nextMessage = messages[visibleCount];
+
+    if (!nextMessage || nextMessage.speaker === "human") {
+      return;
+    }
+
+    if (nextMessage.speaker === "agent") {
+      setThinkingIndex(visibleCount);
+      return;
+    }
+
+    if (nextMessage.speaker === "system") {
+      setSystemThinkingIndex(visibleCount);
+      return;
+    }
+
+    const autoTimer = window.setTimeout(() => {
+      setVisibleCount((current) => Math.min(messages.length, current + 1));
+    }, 450);
+
+    return () => window.clearTimeout(autoTimer);
+  }, [isBusy, isComplete, isStarted, messages, visibleCount]);
+
+  useEffect(() => {
+    if (thinkingIndex === null) {
+      return;
+    }
+
+    const thinkingTimer = window.setTimeout(() => {
+      setThinkingIndex(null);
+      setVisibleCount((current) => Math.max(current, thinkingIndex + 1));
+      setStreamingIndex(thinkingIndex);
+    }, 2000);
+
+    return () => window.clearTimeout(thinkingTimer);
+  }, [thinkingIndex]);
+
+  useEffect(() => {
+    if (systemThinkingIndex === null) {
+      return;
+    }
+
+    const systemTimer = window.setTimeout(() => {
+      setSystemThinkingIndex(null);
+      setVisibleCount((current) => Math.max(current, systemThinkingIndex + 1));
+    }, 1100);
+
+    return () => window.clearTimeout(systemTimer);
+  }, [systemThinkingIndex]);
+
+  function showNextHumanInput() {
+    if (isBusy || !hasNextHumanInput) {
+      return;
+    }
+
+    setVisibleCount(nextHumanIndex + 1);
+  }
+
+  function resetInteraction() {
+    setVisibleCount(0);
+    setStreamingIndex(null);
+    setThinkingIndex(null);
+    setSystemThinkingIndex(null);
+    setStreamedText("");
+  }
+
+  function findArtifact(name?: string) {
+    return phase.artifacts.find((artifact) => artifact.name === name);
+  }
+
+  return (
+    <section className="bmad-chat-panel" aria-label={`${phase.title} interaction simulation`}>
+      <div className="bmad-chat-header">
+        <div>
+          <span>Human and BMAD simulation</span>
+          <strong>
+            {phase.agent.icon} {phase.agent.name}
+          </strong>
+        </div>
+        <div className="bmad-chat-count">
+          {visibleCount}/{messages.length}
+        </div>
+      </div>
+
+      <div className={`bmad-chat-screen ${isStarted ? "" : "empty"}`} ref={chatScreenRef}>
+        {!isStarted ? (
+          <div className="bmad-chat-empty">
+            <span aria-hidden="true">💬</span>
+            <strong>Start the BMAD interaction</strong>
+            <p>Click start to step through how the human and BMAD agent create this phase output.</p>
+          </div>
+        ) : (
+          <>
+            {visibleMessages.map((message, index) => {
+              const artifact = findArtifact(message.artifactName);
+
+              return (
+                <div className={`bmad-chat-message ${message.speaker}`} key={`${message.text}-${index}`}>
+                  {message.speaker !== "artifact" ? (
+                    <>
+                      <span>
+                        {message.speaker === "human"
+                          ? "Human"
+                          : message.speaker === "agent"
+                            ? `${phase.agent.icon} AI Agent: ${phase.agent.name}`
+                            : "System"}
+                      </span>
+                      <p>
+                        {message.speaker === "agent" && streamingIndex === index
+                          ? streamedText
+                          : message.text}
+                        {message.speaker === "agent" && streamingIndex === index ? (
+                          <i className="bmad-stream-cursor" aria-hidden="true" />
+                        ) : null}
+                      </p>
+                    </>
+                  ) : (
+                    <div className="bmad-chat-artifact-card">
+                      <span>Artifact created</span>
+                      <p>{message.text}</p>
+                      {artifact ? (
+                        <div>
+                          <strong>{artifact.name}</strong>
+                          <button type="button" onClick={() => onPreview(artifact)}>
+                            Preview
+                          </button>
+                          <button type="button" onClick={() => onDownload(artifact)}>
+                            Download
+                          </button>
+                        </div>
+                      ) : null}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            {thinkingIndex !== null ? (
+              <div className="bmad-chat-message agent thinking">
+                <span>
+                  {phase.agent.icon} AI Agent: {phase.agent.name}
+                </span>
+                <p>
+                  BMAD Agent is thinking
+                  <i aria-hidden="true" />
+                </p>
+              </div>
+            ) : null}
+            {systemThinkingIndex !== null ? (
+              <div className="bmad-chat-message system pending">
+                <span>System</span>
+                <p>Running BMAD action</p>
+              </div>
+            ) : null}
+            <div className="bmad-chat-end" />
+          </>
+        )}
+      </div>
+
+      <div className="bmad-chat-actions">
+        <button type="button" onClick={resetInteraction} disabled={!isStarted}>
+          Reset
+        </button>
+        <button
+          className="primary"
+          type="button"
+          onClick={showNextHumanInput}
+          disabled={isComplete || isBusy || !hasNextHumanInput}
+        >
+          {!isStarted
+            ? "Start interaction"
+            : isThinking
+              ? "BMAD Agent is thinking"
+              : isSystemThinking
+                ? "Running BMAD action"
+              : isStreaming
+                ? "Streaming response"
+              : isComplete
+                ? "Interaction complete"
+                : "Next human input"}
+        </button>
+      </div>
+    </section>
   );
 }
 
